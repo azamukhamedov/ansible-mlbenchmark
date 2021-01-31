@@ -1,0 +1,74 @@
+---
+
+- name: Pull Docker image for ML tests
+  hosts: all
+  vars:
+    image_name: tensorflow/tensorflow:2.0.0-gpu-py3
+
+  tasks:
+
+  - name: Install the Docker SDK for Python
+    pip:
+      name: 
+        - docker
+
+  - name: Pull Tensorflow base image
+    docker_container:
+      name: mltest_container
+      image: '{{ image_name }}'
+      state: started
+      command: tail -f /dev/null
+
+  - name: Configure Tensorflow base image to Ansible hosts
+    add_host:
+      name: mltest_container
+      ansible_connection: docker
+      ansible_ssh_user: root
+
+- name: Configure Tensorflow base image for ML
+  hosts: mltest_container
+  gather_facts: false
+
+  tasks:
+
+    - name: Install required packages
+      raw: >
+        apt-get update &&
+        pip install --upgrade pip &&
+        pip install keract &&
+        apt-get install -y libsm6 libxext6 libxrender-dev &&
+        apt-get install -y vim &&
+        apt-get install -y git &&
+        pip install jupyter &&
+        pip install ipynb-py-convert &&
+        pip install tqdm &&
+        pip install tensorflow-datasets
+
+    - name: Install rsync
+      apt:
+        name: rsync
+
+    - name: Copy configuration packages file to the ML container
+      synchronize:
+        src: ~/mltests/packages
+        dest: /app/
+
+    - name: Install the required configuration packages file
+      raw: pip install --upgrade -r /app/packages
+
+    - name: Clean up | Remove rsync
+      raw: apt purge rsync -y
+
+- name: Snapshot base image to create a newly configured image
+  hosts: all
+
+  tasks:
+
+    - name: Commit the Docker image
+      command: docker commit mltest_container mltest
+
+    - name: Remove the existing Docker container
+      docker_container:
+        name: mltest_container
+        state: absent
+        force_kill: yes
